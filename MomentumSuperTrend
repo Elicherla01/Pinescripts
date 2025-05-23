@@ -1,0 +1,163 @@
+//@version=6
+indicator("Momentum vs Consolidation with SuperTrend", overlay=true)
+
+// === INPUTS ===
+adxLength = input.int(14, title="ADX Length")
+adxThreshold = input.float(20, title="ADX Threshold", tooltip="Above this = momentum")
+
+bbLength = input.int(20, title="Bollinger Band Length")
+bbMult = input.float(2.0, title="BB Multiplier")
+bbWidthThreshold = input.float(0.02, title="BB Width Threshold", tooltip="Below this = consolidation")
+
+ema9Length = input.int(9, title="Fast EMA Length")
+ema21Length = input.int(21, title="Slow EMA Length")
+
+// SuperTrend Input parameters
+atrPeriod = input.int(10, "ATR Period", minval=1)
+factor = input.float(3.0, "Factor", minval=0.1, step=0.1)
+
+// Show options
+showDebug = input.bool(false, "Show Debug Info")
+
+// === CALCULATIONS ===
+
+// Calculate ADX
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+
+// Calculate Bollinger Bands & Width
+basis = ta.sma(close, bbLength)
+dev = bbMult * ta.stdev(close, bbLength)
+upper = basis + dev
+lower = basis - dev
+bbWidth = (upper - lower) / basis // normalized BB width
+
+// Calculate EMAs
+ema9 = ta.ema(close, ema9Length)
+ema21 = ta.ema(close, ema21Length)
+
+// === SUPERTREND CALCULATION ===
+// Calculate SuperTrend using the built-in function
+[superTrend, direction] = ta.supertrend(factor, atrPeriod)
+
+// Determine if SuperTrend is bullish or bearish
+isBullish = direction < 0  // In TradingView's implementation, negative direction means bullish
+isBearish = direction > 0  // Positive direction means bearish
+
+// === MARKET CONDITIONS ===
+bool momentumState = adx > adxThreshold and bbWidth > bbWidthThreshold
+bool consolidationState = adx < adxThreshold and bbWidth < bbWidthThreshold
+
+// Track Market State
+var bool inConsolidationPhase = false
+if consolidationState
+    inConsolidationPhase := true
+else if momentumState
+    inConsolidationPhase := false
+
+// === ENTRY AND EXIT CONDITIONS ===
+// Entry conditions
+bool isPriceAboveBothEmas = close > ema21 and close > ema9
+bool isPriceBelowBothEmas = close < ema21 and close < ema9
+
+// Price crossing 21 EMA for exits
+bool crossedBelow21EMA = close < ema21 and close[1] >= ema21
+bool crossedAbove21EMA = close > ema21 and close[1] <= ema21
+
+// Track positions
+var bool inLongPosition = false
+var bool inShortPosition = false
+
+// Entry conditions with position checks - don't generate new signals if already in position
+bool isLongCondition = isPriceAboveBothEmas and isBullish and not inLongPosition
+bool isShortCondition = isPriceBelowBothEmas and isBearish and not inShortPosition
+
+// Generate signals on condition change
+bool longEntrySignal = isLongCondition and not isLongCondition[1]
+bool shortEntrySignal = isShortCondition and not isShortCondition[1]
+
+// Exit signals
+bool exitLongSignal = inLongPosition and crossedBelow21EMA
+bool exitShortSignal = inShortPosition and crossedAbove21EMA
+
+// Update position status
+if longEntrySignal
+    inLongPosition := true
+    inShortPosition := false
+else if shortEntrySignal
+    inShortPosition := true
+    inLongPosition := false
+
+// Reset position tracking after exit
+if exitLongSignal
+    inLongPosition := false
+if exitShortSignal
+    inShortPosition := false
+
+// === PLOTTING ===
+// Background colors
+bgcolor(momentumState ? color.new(color.green, 85) : na, title="Momentum Zone")
+bgcolor(consolidationState ? color.new(color.yellow, 85) : na, title="Consolidation Zone")
+
+// Plot EMAs
+ema9Plot = plot(ema9, color=color.blue, linewidth=2, title="EMA 9")
+ema21Plot = plot(ema21, color=color.red, linewidth=2, title="EMA 21")
+fill(ema9Plot, ema21Plot, color=ema9 > ema21 ? color.new(color.green, 90) : color.new(color.red, 90))
+
+// Plot SuperTrend
+// When bullish (uptrend), plot the SuperTrend line in green
+upTrend = plot(isBullish ? superTrend : na, "Up Trend", color=color.green, style=plot.style_linebr, linewidth=2)
+
+// When bearish (downtrend), plot the SuperTrend line in red
+downTrend = plot(isBearish ? superTrend : na, "Down Trend", color=color.red, style=plot.style_linebr, linewidth=2)
+
+// Create a reference line for the price (for fill purposes)
+bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle", display=display.none)
+
+// Fill the background between price and SuperTrend
+fill(bodyMiddle, upTrend, title="Uptrend Background", color=color.new(color.green, 90), fillgaps=false)
+fill(bodyMiddle, downTrend, title="Downtrend Background", color=color.new(color.red, 90), fillgaps=false)
+
+// Group all LONG signals BELOW the bar
+bool showLongEntryLabel = longEntrySignal and not exitLongSignal  // Priority to exit signals
+bool showExitLongLabel = exitLongSignal
+
+// Group all SHORT signals ABOVE the bar
+bool showShortEntryLabel = shortEntrySignal and not exitShortSignal  // Priority to exit signals
+bool showExitShortLabel = exitShortSignal
+
+// Plot the labels with collision prevention
+// All LONG-related signals below the bar
+plotshape(showLongEntryLabel, title="Long Entry", location=location.belowbar, color=color.green, style=shape.labelup, text="Long", textcolor=color.white, size=size.normal)
+plotshape(showExitLongLabel, title="Exit Long", location=location.belowbar, color=color.new(color.green, 20), style=shape.labelup, text="Exit Long", textcolor=color.white, size=size.normal)
+
+// All SHORT-related signals above the bar
+plotshape(showShortEntryLabel, title="Short Entry", location=location.abovebar, color=color.red, style=shape.labeldown, text="Short", textcolor=color.white, size=size.normal)
+plotshape(showExitShortLabel, title="Exit Short", location=location.abovebar, color=color.new(color.red, 20), style=shape.labeldown, text="Exit Short", textcolor=color.white, size=size.normal)
+
+// Debug plots (conditional)
+adxPlot = showDebug ? adx : na
+bbWidthPlot = showDebug ? bbWidth * 100 : na
+consolidationPlot = showDebug ? (inConsolidationPhase ? 1 : 0) : na
+priceAbovePlot = showDebug ? (isPriceAboveBothEmas ? 1 : 0) : na
+priceBelowPlot = showDebug ? (isPriceBelowBothEmas ? 1 : 0) : na
+bullishPlot = showDebug ? (isBullish ? 1 : 0) : na
+bearishPlot = showDebug ? (isBearish ? 1 : 0) : na
+
+// Plot debug indicators
+plot(adxPlot, "ADX Value", color=color.purple, display=display.pane)
+hline(adxThreshold, "ADX Threshold", color=color.purple, linestyle=hline.style_dashed)
+plot(bbWidthPlot, "BB Width (%)", color=color.orange, display=display.pane)
+hline(bbWidthThreshold * 100, "BB Width Threshold (%)", color=color.orange, linestyle=hline.style_dashed)
+plot(consolidationPlot, "In Consolidation Phase", color=color.fuchsia, style=plot.style_stepline, display=display.pane)
+plot(priceAbovePlot, "Price Above Both EMAs", color=color.green, style=plot.style_stepline, display=display.pane)
+plot(priceBelowPlot, "Price Below Both EMAs", color=color.red, style=plot.style_stepline, display=display.pane)
+plot(bullishPlot, "SuperTrend Bullish", color=color.green, style=plot.style_stepline, display=display.pane)
+plot(bearishPlot, "SuperTrend Bearish", color=color.red, style=plot.style_stepline, display=display.pane)
+
+// Alerts
+alertcondition(longEntrySignal, title="Long Entry", message="Long Entry Signal")
+alertcondition(shortEntrySignal, title="Short Entry", message="Short Entry Signal")
+alertcondition(exitLongSignal, title="Exit Long", message="Exit Long Signal")
+alertcondition(exitShortSignal, title="Exit Short", message="Exit Short Signal")
+alertcondition(direction[1] > 0 and direction < 0, title="SuperTrend Bearish to Bullish", message="SuperTrend changed from Bearish to Bullish")
+alertcondition(direction[1] < 0 and direction > 0, title="SuperTrend Bullish to Bearish", message="SuperTrend changed from Bullish to Bearish")
