@@ -1,0 +1,181 @@
+//@version=6
+indicator("15m ORB with SuperTrend & 21 EMA (Indian Market)", overlay=true, max_lines_count=500)
+
+// === INPUTS ===
+// ORB Settings
+orbMinutes = input.int(15, title="ORB Duration (minutes)", minval=1, maxval=60)
+orbSession = input.session("0915-0930", title="ORB Session Time")
+
+// SuperTrend Settings
+atrPeriod = input.int(10, title="ATR Period", minval=1)
+factor = input.float(3.0, title="SuperTrend Factor", minval=0.1, step=0.1)
+
+// EMA Settings
+emaSource = input.source(close, title="EMA Source")
+emaPeriod = input.int(21, title="EMA Period", minval=1)
+emaColorChange = input.bool(true, title="EMA Directional Color Change")
+
+// Display Settings
+showORBLines = input.bool(true, title="Show ORB Lines")
+showSuperTrend = input.bool(true, title="Show SuperTrend")
+showEMA = input.bool(true, title="Show 21 EMA")
+showSignals = input.bool(true, title="Show Entry Signals")
+showLabels = input.bool(true, title="Show Price Labels")
+
+// Alert Settings
+enableAlerts = input.bool(false, title="Enable Alerts")
+
+// === ORB LOGIC ===
+// Check if current timeframe is suitable for ORB
+isValidTimeframe = timeframe.isintraday and timeframe.multiplier <= orbMinutes
+
+// Session detection
+orbTime = time(timeframe.period, orbSession + ":1234567")
+inSession = not na(orbTime)
+sessionStart = inSession and not inSession[1]
+
+// ORB calculation
+var float orbHigh = na
+var float orbLow = na
+var int orbStartBar = na
+
+if sessionStart
+    orbHigh := high
+    orbLow := low
+    orbStartBar := bar_index
+else if inSession
+    orbHigh := math.max(orbHigh, high)
+    orbLow := math.min(orbLow, low)
+
+// === ORB LINE DRAWING ===
+var line highLine = na
+var line lowLine = na
+var label highLabel = na
+var label lowLabel = na
+
+if isValidTimeframe and not na(orbHigh) and not na(orbLow)
+    // Update or create lines
+    if na(highLine)
+        highLine := line.new(orbStartBar, orbHigh, bar_index, orbHigh, 
+                           color=color.new(color.green, 20), width=2, extend=extend.right)
+        lowLine := line.new(orbStartBar, orbLow, bar_index, orbLow, 
+                          color=color.new(color.red, 20), width=2, extend=extend.right)
+    else
+        line.set_xy1(highLine, orbStartBar, orbHigh)
+        line.set_xy2(highLine, bar_index, orbHigh)
+        line.set_xy1(lowLine, orbStartBar, orbLow)
+        line.set_xy2(lowLine, bar_index, orbLow)
+    
+    // Add price labels
+    if showLabels and na(highLabel)
+        highLabel := label.new(bar_index, orbHigh, text="ORB High: " + str.tostring(orbHigh), 
+                              color=color.green, textcolor=color.white, size=size.small)
+        lowLabel := label.new(bar_index, orbLow, text="ORB Low: " + str.tostring(orbLow), 
+                             color=color.red, textcolor=color.white, size=size.small)
+    else if showLabels
+        label.set_xy(highLabel, bar_index, orbHigh)
+        label.set_text(highLabel, "ORB High: " + str.tostring(orbHigh))
+        label.set_xy(lowLabel, bar_index, orbLow)
+        label.set_text(lowLabel, "ORB Low: " + str.tostring(orbLow))
+
+// Clean up old lines at start of new session
+if sessionStart and not na(highLine)
+    line.delete(highLine)
+    line.delete(lowLine)
+    label.delete(highLabel)
+    label.delete(lowLabel)
+    highLine := na
+    lowLine := na
+    highLabel := na
+    lowLabel := na
+
+// === SUPERTREND ===
+[supertrend, direction] = ta.supertrend(factor, atrPeriod)
+
+// === EMA CALCULATION ===
+ema = ta.ema(emaSource, emaPeriod)
+emaRise = ema[1] < ema
+emaFall = ema[1] > ema
+
+// Enhanced color scheme for EMA
+emaColor = if emaColorChange
+    if emaRise
+        color.new(color.lime, 0)  // Bright green for rising
+    else if emaFall
+        color.new(color.red, 0)   // Red for falling
+    else
+        color.new(color.yellow, 0) // Yellow for sideways
+else
+    color.new(color.blue, 0)      // Blue when color change is off
+
+// Plot SuperTrend
+plot(showSuperTrend ? supertrend : na, 
+     color=direction == -1 ? color.new(color.green, 0) : color.new(color.red, 0), 
+     linewidth=2, title="SuperTrend")
+
+// Plot 21 EMA with enhanced visibility
+plot(showEMA ? ema : na, 
+     color=emaColor, 
+     linewidth=3, 
+     title="21 EMA",
+     display=display.all)
+
+// === SIGNAL GENERATION ===
+// Only generate signals during valid timeframe and after ORB is established
+validSignalTime = isValidTimeframe and not na(orbHigh) and not na(orbLow) and not inSession
+
+// Enhanced signal conditions with EMA confirmation
+// Long signal: Price breaks above ORB high + SuperTrend is bullish + EMA is rising
+longCondition = validSignalTime and ta.crossover(close, orbHigh) and direction == -1 and emaRise
+// Short signal: Price breaks below ORB low + SuperTrend is bearish + EMA is falling
+shortCondition = validSignalTime and ta.crossunder(close, orbLow) and direction == 1 and emaFall
+
+// Alternative signals without EMA filter (optional)
+longConditionBasic = validSignalTime and ta.crossover(close, orbHigh) and direction == -1
+shortConditionBasic = validSignalTime and ta.crossunder(close, orbLow) and direction == 1
+
+// Plot signals
+plotshape(showSignals and longCondition, title="Long Signal", 
+          location=location.belowbar, color=color.green, 
+          style=shape.triangleup, size=size.normal)
+plotshape(showSignals and shortCondition, title="Short Signal", 
+          location=location.abovebar, color=color.red, 
+          style=shape.triangledown, size=size.normal)
+
+// === BACKGROUND COLORING ===
+// Highlight ORB session
+bgcolor(inSession ? color.new(color.yellow, 95) : na, title="ORB Session")
+
+// === TABLE FOR ORB VALUES ===
+var table orbTable = table.new(position.top_right, 2, 4, bgcolor=color.white, border_width=1)
+
+if barstate.islast and not na(orbHigh) and not na(orbLow)
+    table.cell(orbTable, 0, 0, "ORB High", text_color=color.green, text_size=size.small)
+    table.cell(orbTable, 1, 0, str.tostring(orbHigh, "#.##"), text_color=color.black, text_size=size.small)
+    table.cell(orbTable, 0, 1, "ORB Low", text_color=color.red, text_size=size.small)
+    table.cell(orbTable, 1, 1, str.tostring(orbLow, "#.##"), text_color=color.black, text_size=size.small)
+    table.cell(orbTable, 0, 2, "Range", text_color=color.blue, text_size=size.small)
+    table.cell(orbTable, 1, 2, str.tostring(orbHigh - orbLow, "#.##"), text_color=color.black, text_size=size.small)
+    table.cell(orbTable, 0, 3, "21 EMA", text_color=color.purple, text_size=size.small)
+    table.cell(orbTable, 1, 3, str.tostring(ema, "#.##") + (emaRise ? " ↑" : emaFall ? " ↓" : " →"), text_color=color.black, text_size=size.small)
+
+// === ALERTS ===
+if enableAlerts
+    if longCondition
+        alert("ORB Long Signal: Price broke above " + str.tostring(orbHigh) + " with SuperTrend bullish and 21 EMA rising", alert.freq_once_per_bar)
+    if shortCondition
+        alert("ORB Short Signal: Price broke below " + str.tostring(orbLow) + " with SuperTrend bearish and 21 EMA falling", alert.freq_once_per_bar)
+    
+    // EMA Direction Alerts
+    if emaRise and not emaRise[1]
+        alert("21 EMA is Rising", alert.freq_once_per_bar)
+    if emaFall and not emaFall[1]
+        alert("21 EMA is Falling", alert.freq_once_per_bar)
+
+// === STATISTICS ===
+// Calculate some basic statistics
+orbRange = not na(orbHigh) and not na(orbLow) ? orbHigh - orbLow : na
+avgRange = ta.sma(orbRange, 20) // 20-day average ORB range
+
+// Plot average range as a reference (invisible plot for statistical tracking)
+plot(na, title="Average ORB Range", display=display.none)
