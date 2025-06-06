@@ -1,0 +1,164 @@
+//@version=6
+// Author: Ravindra Elichera
+indicator("Options Strategy Super Trend EMA Indicator", overlay=true)
+
+// Input parameters
+atrPeriod = input.int(10, "ATR Period", minval=1)
+factor = input.float(3.5, "Factor", minval=0.1, step=0.1)
+emaPeriod = input.int(21, "EMA Period", minval=1)
+
+// Additional filters
+useVolumeFilter = input.bool(false, "Use Volume Filter")
+volumeMA = input.int(20, "Volume MA Period", minval=1)
+
+// Label settings
+showPriceInLabels = input.bool(true, "Show Price in Labels")
+showProfitInExitLabels = input.bool(true, "Show Profit in Exit Labels")
+
+// Calculate indicators
+ema = ta.ema(close, emaPeriod)
+[superTrend, direction] = ta.supertrend(factor, atrPeriod)
+
+// Volume filter
+volumeFilter = not useVolumeFilter or volume > ta.sma(volume, volumeMA)
+
+// Determine if super trend is green (bullish) or red (bearish)
+isBullish = direction < 0
+isBearish = direction > 0
+
+// Plot indicators
+plot(ema, "EMA", color=color.blue, linewidth=2)
+upTrend = plot(isBullish ? superTrend : na, "Up Trend", color=color.green, style=plot.style_linebr, linewidth=2)
+downTrend = plot(isBearish ? superTrend : na, "Down Trend", color=color.red, style=plot.style_linebr, linewidth=2)
+
+// State variables to track active signals (persist across bars)
+var bool inLongPosition = false
+var bool inShortPosition = false
+
+// Track entry prices for profit calculation
+var float longEntryPrice = na
+var float shortEntryPrice = na
+
+// Long entry condition: Super Trend is Green and price crosses above EMA (Bull Call Spread)
+rawLongCondition = isBullish and close > ema and close[1] <= ema[1]
+longCondition = rawLongCondition and not inLongPosition and volumeFilter
+
+// Long exit condition: Price crosses below Super Trend (Exit Bull Call Spread)
+longExitCondition = close < superTrend and isBullish and inLongPosition
+
+// Short entry condition: Super Trend is Red and price crosses below EMA (Bear Call Spread)
+rawShortCondition = isBearish and close < ema and close[1] >= ema[1]
+shortCondition = rawShortCondition and not inShortPosition and volumeFilter
+
+// Short exit condition: Price crosses above Super Trend (Exit Bear Call Spread)
+shortExitCondition = close > superTrend and isBearish and inShortPosition
+
+// Update position state and track entry prices
+if longCondition
+    inLongPosition := true
+    inShortPosition := false
+    longEntryPrice := close
+    label.new(bar_index, high * 1.01, "LONG POS START", style=label.style_label_down, color=color.blue, textcolor=color.white, size=size.tiny)
+
+if shortCondition
+    inShortPosition := true
+    inLongPosition := false
+    shortEntryPrice := close
+    label.new(bar_index, low * 0.99, "SHORT POS START", style=label.style_label_up, color=color.blue, textcolor=color.white, size=size.tiny)
+
+// Check exit conditions after entry updates
+if longExitCondition
+    inLongPosition := false
+    longEntryPrice := na
+    label.new(bar_index, low * 0.99, "LONG POS END", style=label.style_label_up, color=color.purple, textcolor=color.white, size=size.tiny)
+
+if shortExitCondition
+    inShortPosition := false
+    shortEntryPrice := na
+    label.new(bar_index, high * 1.01, "SHORT POS END", style=label.style_label_down, color=color.purple, textcolor=color.white, size=size.tiny)
+
+// Calculate profit/loss
+longProfit = inLongPosition ? ((close - longEntryPrice) / longEntryPrice) * 100 : na
+shortProfit = inShortPosition ? ((shortEntryPrice - close) / shortEntryPrice) * 100 : na
+
+// Create label text for options strategies
+bullPutEntryText = showPriceInLabels ? "Enter\nBull Put Spread\n" + str.tostring(close, format.price) : "Enter\nBull Put Spread"
+bearCallEntryText = showPriceInLabels ? "Enter\nBear Call Spread\n" + str.tostring(close, format.price) : "Enter\nBear Call Spread"
+
+// Create exit label text with optional profit
+longExitProfit = longExitCondition and showProfitInExitLabels ? ((close - longEntryPrice) / longEntryPrice) * 100 : na
+shortExitProfit = shortExitCondition and showProfitInExitLabels ? ((shortEntryPrice - close) / shortEntryPrice) * 100 : na
+
+bullPutExitText = longExitCondition and showProfitInExitLabels and not na(longExitProfit) ? "Exit\nBull Put Spread\n" + str.tostring(longExitProfit, format.percent) : "Exit\nBull Put Spread"
+bearCallExitText = shortExitCondition and showProfitInExitLabels and not na(shortExitProfit) ? "Exit\nBear Call Spread\n" + str.tostring(shortExitProfit, format.percent) : "Exit\nBear Call Spread"
+
+// Plot options strategy signals with shapes
+plotshape(longCondition, "Bull Put Spread Entry", location=location.belowbar, color=color.new(color.green, 0), style=shape.triangleup, size=size.normal)
+plotshape(longExitCondition, "Bull Put Spread Exit", location=location.abovebar, color=color.new(color.orange, 0), style=shape.xcross, size=size.normal)
+plotshape(shortCondition, "Bear Call Spread Entry", location=location.abovebar, color=color.new(color.red, 0), style=shape.triangledown, size=size.normal)
+plotshape(shortExitCondition, "Bear Call Spread Exit", location=location.belowbar, color=color.new(color.orange, 0), style=shape.xcross, size=size.normal)
+
+// Create labels with dynamic text
+if longCondition
+    label.new(bar_index, low * 0.999, bullPutEntryText, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.normal)
+
+if longExitCondition
+    label.new(bar_index, high * 1.003, bullPutExitText, style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.white, size=size.normal)
+
+if shortCondition
+    label.new(bar_index, high * 1.001, bearCallEntryText, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal)
+
+if shortExitCondition
+    label.new(bar_index, low * 0.997, bearCallExitText, style=label.style_label_up, color=color.new(color.orange, 0), textcolor=color.white, size=size.normal)
+
+// Additional prominent exit labels
+if longExitCondition
+    label.new(bar_index, high * 1.01, "EXIT\nBULL PUT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.large)
+
+if shortExitCondition
+    label.new(bar_index, low * 0.99, "EXIT\nBEAR CALL", style=label.style_label_up, color=color.new(color.red, 0), textcolor=color.white, size=size.large)
+
+// Debug label to show position state
+if barstate.islast
+    debugText = "Debug Info:\n"
+    debugText += "In Long: " + str.tostring(inLongPosition) + "\n"
+    debugText += "In Short: " + str.tostring(inShortPosition) + "\n"
+    debugText += "Is Bullish: " + str.tostring(isBullish) + "\n"
+    debugText += "Is Bearish: " + str.tostring(isBearish) + "\n"
+    debugText += "Close: " + str.tostring(close) + "\n"
+    debugText += "SuperTrend: " + str.tostring(superTrend) + "\n"
+    debugText += "Long Exit Cond: " + str.tostring(longExitCondition) + "\n"
+    debugText += "Short Exit Cond: " + str.tostring(shortExitCondition)
+    
+    label.new(bar_index, high * 1.05, debugText, style=label.style_label_left, color=color.black, textcolor=color.white, size=size.small)
+
+// Fill the background between Super Trend lines
+fill(upTrend, downTrend, color=color.new(color.green, 90), title="Super Trend Background")
+
+// Background color for active positions
+bgcolor(inLongPosition ? color.new(color.green, 90) : na, title="Bull Put Spread Active")
+bgcolor(inShortPosition ? color.new(color.red, 90) : na, title="Bear Call Spread Active")
+
+// Display current position status
+var table positionTable = table.new(position.top_right, 1, 4, bgcolor=color.new(color.black, 80))
+if barstate.islast
+    table.cell(positionTable, 0, 0, "Position Status", text_color=color.white, text_size=size.normal)
+    
+    if inLongPosition
+        table.cell(positionTable, 0, 1, "BULL PUT SPREAD", text_color=color.green, text_size=size.normal)
+        table.cell(positionTable, 0, 2, "P/L: " + str.tostring(longProfit, format.percent), text_color=longProfit >= 0 ? color.green : color.red, text_size=size.normal)
+        table.cell(positionTable, 0, 3, "Entry: " + str.tostring(longEntryPrice, format.price), text_color=color.white, text_size=size.small)
+    else if inShortPosition
+        table.cell(positionTable, 0, 1, "BEAR CALL SPREAD", text_color=color.red, text_size=size.normal)
+        table.cell(positionTable, 0, 2, "P/L: " + str.tostring(shortProfit, format.percent), text_color=shortProfit >= 0 ? color.green : color.red, text_size=size.normal)
+        table.cell(positionTable, 0, 3, "Entry: " + str.tostring(shortEntryPrice, format.price), text_color=color.white, text_size=size.small)
+    else
+        table.cell(positionTable, 0, 1, "NEUTRAL", text_color=color.gray, text_size=size.normal)
+        table.cell(positionTable, 0, 2, "", text_color=color.gray, text_size=size.normal)
+        table.cell(positionTable, 0, 3, "", text_color=color.gray, text_size=size.normal)
+
+// Alert conditions
+alertcondition(longCondition, title="Bull Put Spread Entry", message="Super Trend EMA: Enter Bull Put Spread")
+alertcondition(longExitCondition, title="Bull Put Spread Exit", message="Super Trend EMA: Exit Bull Put Spread")
+alertcondition(shortCondition, title="Bear Call Spread Entry", message="Super Trend EMA: Enter Bear Call Spread")
+alertcondition(shortExitCondition, title="Bear Call Spread Exit", message="Super Trend EMA: Exit Bear Call Spread")
