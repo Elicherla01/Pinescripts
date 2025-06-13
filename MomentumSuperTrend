@@ -1,4 +1,5 @@
 //@version=6
+//Entry of Long ends when you see Red Dot. Entry of Short ends when you see Green dot
 indicator("Momentum vs Consolidation with SuperTrend", overlay=true)
 
 // === INPUTS ===
