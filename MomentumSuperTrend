@@ -128,11 +128,11 @@ bool showExitShortLabel = exitShortSignal
 // Plot the labels with collision prevention
 // All LONG-related signals below the bar
 plotshape(showLongEntryLabel, title="Long Entry", location=location.belowbar, color=color.green, style=shape.labelup, text="Long", textcolor=color.white, size=size.normal)
-plotshape(showExitLongLabel, title="Exit Long", location=location.belowbar, color=color.new(color.green, 20), style=shape.labelup, text="Exit Long", textcolor=color.white, size=size.normal)
+plotshape(showExitLongLabel, title="Exit Long", location=location.belowbar, color=color.red, style=shape.circle, size=size.small)
 
 // All SHORT-related signals above the bar
 plotshape(showShortEntryLabel, title="Short Entry", location=location.abovebar, color=color.red, style=shape.labeldown, text="Short", textcolor=color.white, size=size.normal)
-plotshape(showExitShortLabel, title="Exit Short", location=location.abovebar, color=color.new(color.red, 20), style=shape.labeldown, text="Exit Short", textcolor=color.white, size=size.normal)
+plotshape(showExitShortLabel, title="Exit Short", location=location.abovebar, color=color.green, style=shape.circle, size=size.small)
 
 // Debug plots (conditional)
 adxPlot = showDebug ? adx : na
