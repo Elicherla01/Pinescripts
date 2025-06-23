@@ -1,4 +1,5 @@
 //@version=6
+//Author: Ravindra Elicherla
 indicator("MA Angle Trading System", shorttitle="MAATS", overlay=true)
 
 // Input Parameters
