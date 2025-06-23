@@ -1,0 +1,158 @@
+//@version=6
+indicator("MA Angle Trading System", shorttitle="MAATS", overlay=true)
+
+// Input Parameters
+ma1_length = input.int(20, title="Fast MA Length", minval=1)
+ma2_length = input.int(50, title="Medium MA Length", minval=1)
+ma3_length = input.int(200, title="Slow MA Length", minval=1)
+ma_type = input.string("SMA", title="MA Type", options=["SMA", "EMA", "WMA"])
+angle_lookback = input.int(5, title="Angle Calculation Lookback", minval=1)
+signal_threshold = input.float(60.0, title="Signal Threshold", minval=0, maxval=100)
+
+// Moving Average Function
+get_ma(source, length, ma_type) =>
+    switch ma_type
+        "SMA" => ta.sma(source, length)
+        "EMA" => ta.ema(source, length)
+        "WMA" => ta.wma(source, length)
+        => ta.sma(source, length)
+
+// Calculate Moving Averages
+ma1 = get_ma(close, ma1_length, ma_type)
+ma2 = get_ma(close, ma2_length, ma_type)
+ma3 = get_ma(close, ma3_length, ma_type)
+
+// Calculate Angles in Degrees
+calc_angle(ma_current, ma_previous, periods) =>
+    if na(ma_previous)
+        0.0
+    else
+        slope = (ma_current - ma_previous) / periods
+        math.atan(slope) * (180 / math.pi)
+
+angle1 = calc_angle(ma1, ma1[angle_lookback], angle_lookback)
+angle2 = calc_angle(ma2, ma2[angle_lookback], angle_lookback)
+angle3 = calc_angle(ma3, ma3[angle_lookback], angle_lookback)
+
+// Alignment Score (-100 to +100)
+calc_alignment_score() =>
+    score = 0.0
+    
+    // Check if MAs are in bullish order (ma1 > ma2 > ma3)
+    if ma1 > ma2 and ma2 > ma3
+        score := 100.0
+    // Check if MAs are in bearish order (ma1 < ma2 < ma3)
+    else if ma1 < ma2 and ma2 < ma3
+        score := -100.0
+    // Partial alignment scoring
+    else
+        partial_score = 0.0
+        if ma1 > ma2
+            partial_score := partial_score + 33.33
+        else
+            partial_score := partial_score - 33.33
+        
+        if ma2 > ma3
+            partial_score := partial_score + 33.33
+        else
+            partial_score := partial_score - 33.33
+            
+        if ma1 > ma3
+            partial_score := partial_score + 33.33
+        else
+            partial_score := partial_score - 33.33
+            
+        score := partial_score
+    
+    score
+
+alignment_score = calc_alignment_score()
+
+// Angle Sum Score (normalized)
+angle_sum = (angle1 + angle2 + angle3) / 3
+angle_score = math.max(-100, math.min(100, angle_sum * 10)) // Scale and limit
+
+// Momentum Score (based on MA spread changes)
+calc_momentum_score() =>
+    current_spread = math.abs(ma1 - ma3)
+    previous_spread = math.abs(ma1[1] - ma3[1])
+    
+    if na(previous_spread) or previous_spread == 0
+        0.0
+    else
+        spread_change = (current_spread - previous_spread) / previous_spread * 100
+        
+        // Determine if spread is expanding in trend direction
+        trend_direction = ma1 > ma3 ? 1 : -1
+        momentum = spread_change * trend_direction
+        
+        math.max(-100, math.min(100, momentum))
+
+momentum_score = calc_momentum_score()
+
+// Composite Signal Score
+signal_score = (alignment_score * 0.4) + (angle_score * 0.3) + (momentum_score * 0.3)
+
+// Generate Trading Signals
+is_buy = signal_score >= signal_threshold
+is_sell = signal_score <= -signal_threshold
+is_neutral = not is_buy and not is_sell
+
+// Signal Changes for Alerts
+buy_signal = is_buy and not is_buy[1]
+sell_signal = is_sell and not is_sell[1]
+
+// Plot Moving Averages
+plot(ma1, color=color.blue, linewidth=2, title="Fast MA")
+plot(ma2, color=color.orange, linewidth=2, title="Medium MA")
+plot(ma3, color=color.red, linewidth=2, title="Slow MA")
+
+// Plot Signal Background
+bgcolor(is_buy ? color.new(color.green, 90) : is_sell ? color.new(color.red, 90) : na)
+
+// Plot Buy/Sell Signals
+plotshape(buy_signal, style=shape.labelup, location=location.belowbar, 
+          color=color.green, textcolor=color.white, text="BUY", size=size.normal)
+plotshape(sell_signal, style=shape.labeldown, location=location.abovebar, 
+          color=color.red, textcolor=color.white, text="SELL", size=size.normal)
+
+// Create Table for Scores
+if barstate.islast
+    var table score_table = table.new(position.top_right, 2, 7, bgcolor=color.white, border_width=1)
+    
+    table.cell(score_table, 0, 0, "Metric", text_color=color.black, bgcolor=color.gray)
+    table.cell(score_table, 1, 0, "Value", text_color=color.black, bgcolor=color.gray)
+    
+    table.cell(score_table, 0, 1, "Fast MA Angle", text_color=color.black)
+    table.cell(score_table, 1, 1, str.tostring(math.round(angle1, 2)) + "°", 
+               text_color=angle1 > 0 ? color.green : color.red)
+    
+    table.cell(score_table, 0, 2, "Medium MA Angle", text_color=color.black)
+    table.cell(score_table, 1, 2, str.tostring(math.round(angle2, 2)) + "°", 
+               text_color=angle2 > 0 ? color.green : color.red)
+    
+    table.cell(score_table, 0, 3, "Slow MA Angle", text_color=color.black)
+    table.cell(score_table, 1, 3, str.tostring(math.round(angle3, 2)) + "°", 
+               text_color=angle3 > 0 ? color.green : color.red)
+    
+    table.cell(score_table, 0, 4, "Alignment Score", text_color=color.black)
+    table.cell(score_table, 1, 4, str.tostring(math.round(alignment_score, 1)), 
+               text_color=alignment_score > 0 ? color.green : color.red)
+    
+    table.cell(score_table, 0, 5, "Signal Score", text_color=color.black)
+    table.cell(score_table, 1, 5, str.tostring(math.round(signal_score, 1)), 
+               text_color=signal_score > signal_threshold ? color.green : 
+               signal_score < -signal_threshold ? color.red : color.orange)
+    
+    table.cell(score_table, 0, 6, "Signal", text_color=color.black)
+    signal_text = is_buy ? "BUY" : is_sell ? "SELL" : "NEUTRAL"
+    signal_color = is_buy ? color.green : is_sell ? color.red : color.orange
+    table.cell(score_table, 1, 6, signal_text, text_color=signal_color)
+
+// Alerts
+alertcondition(buy_signal, title="Buy Signal", message="MA Angle System: BUY Signal Generated")
+alertcondition(sell_signal, title="Sell Signal", message="MA Angle System: SELL Signal Generated")
+
+// Plot histogram of signal score (optional - in separate pane)
+// Uncomment the next line if you want signal score as histogram
+// plot(signal_score, title="Signal Score", color=signal_score > 0 ? color.green : color.red, display=display.pane)
